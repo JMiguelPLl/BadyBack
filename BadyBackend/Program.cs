@@ -240,7 +240,7 @@ app.UseStaticFiles();
 app.MapControllers();
 
 // ==========================================
-// APLICAR MIGRACIONES AUTOMÁTICAS EN LA BD
+// APLICAR MIGRACIONES AUTOMÁTICAS Y SEED
 // ==========================================
 using (var scope = app.Services.CreateScope())
 {
@@ -250,10 +250,61 @@ using (var scope = app.Services.CreateScope())
         var context = services.GetRequiredService<AppDbContext>();
         context.Database.Migrate();
         Console.WriteLine(">>> Migraciones de PostgreSQL aplicadas exitosamente.");
+
+        // 1. Roles
+        if (!context.Rols.Any())
+        {
+            context.Rols.AddRange(
+                new BadyBackend.Models.Rol { Descripcion = "Administrador", Estado = "Activo" },
+                new BadyBackend.Models.Rol { Descripcion = "Distribuidor", Estado = "Activo" },
+                new BadyBackend.Models.Rol { Descripcion = "Cliente", Estado = "Activo" }
+            );
+            context.SaveChanges();
+            Console.WriteLine(">>> Roles sembrados exitosamente.");
+        }
+
+        // 2. Tipos de Pago
+        if (!context.Tipo_Pagos.Any())
+        {
+            context.Tipo_Pagos.AddRange(
+                new BadyBackend.Models.Tipo_Pago { Descripcion = "Efectivo", Estado = "Activo" },
+                new BadyBackend.Models.Tipo_Pago { Descripcion = "QR", Estado = "Activo" }
+            );
+            context.SaveChanges();
+            Console.WriteLine(">>> Tipos de pago sembrados exitosamente.");
+        }
+
+        // 3. Usuario Administrador por defecto
+        if (!context.Usuarios.Any(u => u.Email.ToLower() == "admin@badys.com"))
+        {
+            var adminUser = new BadyBackend.Models.Usuario
+            {
+                Nombre = "Administrador General",
+                Numero = "70000000",
+                Email = "admin@badys.com",
+                Contraseña = "admin123",
+                Estado = "Activo"
+            };
+            context.Usuarios.Add(adminUser);
+            context.SaveChanges();
+
+            var adminRol = context.Rols.FirstOrDefault(r => r.Descripcion == "Administrador");
+            if (adminRol != null)
+            {
+                context.Usuario_Rols.Add(new BadyBackend.Models.Usuario_rol
+                {
+                    id_rol = adminRol.Id,
+                    id_usuario = adminUser.Id,
+                    Estado = "Activo"
+                });
+                context.SaveChanges();
+            }
+            Console.WriteLine(">>> Usuario Administrador sembrado exitosamente.");
+        }
     }
     catch (Exception ex)
     {
-        Console.WriteLine($">>> Error al aplicar migraciones en PostgreSQL: {ex.Message}");
+        Console.WriteLine($">>> Error al aplicar migraciones/seed en PostgreSQL: {ex.Message}");
     }
 }
 

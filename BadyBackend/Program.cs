@@ -36,16 +36,18 @@ builder.Services.Configure<IISServerOptions>(options =>
 
 builder.Services.AddCors(options =>
 {
+    options.AddDefaultPolicy(policy =>
+    {
+        policy
+            .AllowAnyOrigin()
+            .AllowAnyHeader()
+            .AllowAnyMethod();
+    });
+
     options.AddPolicy("AllowFrontend", policy =>
     {
         policy
-            .WithOrigins(
-                "https://badytupiza.onrender.com",
-                "http://localhost:8081",
-                "http://localhost:19006",
-                "http://localhost:3000"
-            )
-            .SetIsOriginAllowed(_ => true)
+            .AllowAnyOrigin()
             .AllowAnyHeader()
             .AllowAnyMethod();
     });
@@ -159,6 +161,9 @@ var app = builder.Build();
 // PIPELINE
 // =====================
 
+app.UseCors();
+app.UseCors("AllowFrontend");
+
 app.MapOpenApi();
 
 app.MapScalarApiReference(options =>
@@ -175,8 +180,6 @@ app.MapScalarApiReference(options =>
 
 // Se deja comentado para permitir HTTP desde Android
 // app.UseHttpsRedirection();
-
-app.UseCors("AllowFrontend");
 
 app.UseAuthentication();
 app.UseAuthorization();

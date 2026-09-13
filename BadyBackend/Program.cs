@@ -39,14 +39,18 @@ builder.Services.AddCors(options =>
     options.AddPolicy("AllowFrontend", policy =>
     {
         policy
-            .AllowAnyOrigin()
+            .WithOrigins(
+                "https://badytupiza.onrender.com",
+                "http://localhost:8081",
+                "http://localhost:19006",
+                "http://localhost:3000"
+            )
+            .SetIsOriginAllowed(_ => true)
             .AllowAnyHeader()
             .AllowAnyMethod();
     });
 });
 
-// =====================
-// BASE DE DATOS
 // =====================
 // BASE DE DATOS
 // =====================

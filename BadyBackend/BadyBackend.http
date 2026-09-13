@@ -1,0 +1,6 @@
+@BadyBackend_HostAddress = http://localhost:5115
+
+GET {{BadyBackend_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

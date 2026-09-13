@@ -1,0 +1,24 @@
+﻿## Visual Studio
+.vs/
+*.user
+*.userosscache
+*.sln.docstates
+*.suo
+
+## Build results
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+[Bb]in/
+[Oo]bj/
+
+## Visual Studio Code
+.vscode/
+
+## Rider
+.idea/
+
+## Temp
+*.tmp
+*.log

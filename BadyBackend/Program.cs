@@ -48,11 +48,39 @@ builder.Services.AddCors(options =>
 // =====================
 // BASE DE DATOS
 // =====================
+// BASE DE DATOS
+// =====================
 
-var connectionString =
+var rawConnectionString =
     builder.Configuration.GetConnectionString("Connection")
+    ?? builder.Configuration["DATABASE_URL"]
     ?? throw new InvalidOperationException(
-        "No se encontró la cadena de conexión 'Connection'.");
+        "No se encontró la cadena de conexión 'Connection' ni 'DATABASE_URL'.");
+
+string connectionString;
+if (rawConnectionString.StartsWith("postgres://", StringComparison.OrdinalIgnoreCase) ||
+    rawConnectionString.StartsWith("postgresql://", StringComparison.OrdinalIgnoreCase))
+{
+    var uri = new Uri(rawConnectionString);
+    var userInfo = uri.UserInfo.Split(':');
+    var user = userInfo[0];
+    var password = userInfo.Length > 1 ? userInfo[1] : "";
+    var host = uri.Host;
+    var portNumber = uri.Port > 0 ? uri.Port : 5432;
+    var database = uri.AbsolutePath.TrimStart('/');
+
+    connectionString = $"Host={host};Port={portNumber};Database={database};Username={user};Password={password};SSL Mode=Require;Trust Server Certificate=true;";
+}
+else
+{
+    connectionString = rawConnectionString;
+    if (!connectionString.Contains("SSL Mode", StringComparison.OrdinalIgnoreCase) &&
+        !connectionString.Contains("localhost", StringComparison.OrdinalIgnoreCase) &&
+        !connectionString.Contains("127.0.0.1", StringComparison.OrdinalIgnoreCase))
+    {
+        connectionString += ";SSL Mode=Require;Trust Server Certificate=true;";
+    }
+}
 
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(connectionString));
@@ -158,5 +186,23 @@ if (!Directory.Exists(imagenesPath))
 app.UseStaticFiles();
 
 app.MapControllers();
+
+// ==========================================
+// APLICAR MIGRACIONES AUTOMÁTICAS EN LA BD
+// ==========================================
+using (var scope = app.Services.CreateScope())
+{
+    var services = scope.ServiceProvider;
+    try
+    {
+        var context = services.GetRequiredService<AppDbContext>();
+        context.Database.Migrate();
+        Console.WriteLine(">>> Migraciones de PostgreSQL aplicadas exitosamente.");
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($">>> Error al aplicar migraciones en PostgreSQL: {ex.Message}");
+    }
+}
 
 app.Run();

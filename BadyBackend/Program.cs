@@ -6,6 +6,9 @@ using Microsoft.IdentityModel.Tokens;
 using Scalar.AspNetCore;
 using System.Text;
 
+// Compatibilidad de fechas DateTime con PostgreSQL (Npgsql)
+AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Permite acceso local y en la nube (Render asigna la variable de entorno PORT)
@@ -159,10 +162,9 @@ builder.Services.AddAuthorization();
 
 var app = builder.Build();
 
-// =====================
-// PIPELINE
-// =====================
-
+// ========================================================
+// MIDDLEWARE GLOBAL: MANEJO DE ERRORES Y CORS INCONDICIONAL
+// ========================================================
 app.Use(async (context, next) =>
 {
     context.Response.Headers["Access-Control-Allow-Origin"] = "*";
@@ -176,7 +178,32 @@ app.Use(async (context, next) =>
         return;
     }
 
-    await next();
+    try
+    {
+        await next();
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"\n[ERROR FATAL CAPTURADO]: {ex.Message}");
+        Console.WriteLine($"StackTrace: {ex.StackTrace}\n");
+
+        if (!context.Response.HasStarted)
+        {
+            context.Response.StatusCode = 500;
+            context.Response.ContentType = "application/json";
+            context.Response.Headers["Access-Control-Allow-Origin"] = "*";
+            context.Response.Headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, PATCH, OPTIONS";
+            context.Response.Headers["Access-Control-Allow-Headers"] = "*";
+
+            var errorResponse = new
+            {
+                error = ex.Message,
+                innerError = ex.InnerException?.Message,
+                stackTrace = ex.StackTrace
+            };
+            await context.Response.WriteAsJsonAsync(errorResponse);
+        }
+    }
 });
 
 app.UseCors();

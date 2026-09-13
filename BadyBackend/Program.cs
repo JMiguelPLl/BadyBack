@@ -58,8 +58,10 @@ builder.Services.AddCors(options =>
 // =====================
 
 var rawConnectionString =
-    builder.Configuration.GetConnectionString("Connection")
+    Environment.GetEnvironmentVariable("DATABASE_URL")
+    ?? Environment.GetEnvironmentVariable("ConnectionStrings__Connection")
     ?? builder.Configuration["DATABASE_URL"]
+    ?? builder.Configuration.GetConnectionString("Connection")
     ?? throw new InvalidOperationException(
         "No se encontró la cadena de conexión 'Connection' ni 'DATABASE_URL'.");
 
@@ -160,6 +162,22 @@ var app = builder.Build();
 // =====================
 // PIPELINE
 // =====================
+
+app.Use(async (context, next) =>
+{
+    context.Response.Headers["Access-Control-Allow-Origin"] = "*";
+    context.Response.Headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, PATCH, OPTIONS";
+    context.Response.Headers["Access-Control-Allow-Headers"] = "*";
+
+    if (context.Request.Method == "OPTIONS")
+    {
+        context.Response.StatusCode = 200;
+        await context.Response.CompleteAsync();
+        return;
+    }
+
+    await next();
+});
 
 app.UseCors();
 app.UseCors("AllowFrontend");

@@ -1,4 +1,4 @@
-﻿using BadyBackend.Models;
+using BadyBackend.Models;
 using BadyBackend.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -54,9 +54,7 @@ namespace BadyBackend.Controllers
                 Numero = dto.Numero.Trim(),
                 Email = emailNormalizado,
 
-                // Temporalmente se guarda directamente.
-                // Más adelante debe guardarse usando hash.
-                Contraseña = dto.Contrasena,
+                Contraseña = BadyBackend.Helpers.PasswordHelper.HashPassword(dto.Contrasena),
 
                 Estado = "Activo"
             };
@@ -179,7 +177,7 @@ namespace BadyBackend.Controllers
              */
             if (!string.IsNullOrWhiteSpace(dto.Contrasena))
             {
-                cliente.Contraseña = dto.Contrasena;
+                cliente.Contraseña = BadyBackend.Helpers.PasswordHelper.HashPassword(dto.Contrasena);
             }
 
             await _context.SaveChangesAsync();
@@ -402,7 +400,7 @@ namespace BadyBackend.Controllers
 
             if (!string.IsNullOrWhiteSpace(dto.Contrasena))
             {
-                cliente.Contraseña = dto.Contrasena;
+                cliente.Contraseña = BadyBackend.Helpers.PasswordHelper.HashPassword(dto.Contrasena);
             }
 
             await _context.SaveChangesAsync();

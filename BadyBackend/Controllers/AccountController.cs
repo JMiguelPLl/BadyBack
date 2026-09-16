@@ -1,4 +1,4 @@
-﻿using BadyBackend.DTOs;
+using BadyBackend.DTOs;
 using BadyBackend.DTOs.BadyBackend.DTOs;
 using BadyBackend.Data;
 using Microsoft.AspNetCore.Authorization;
@@ -64,14 +64,23 @@ namespace BadyBackend.Controllers
 
             if (usuario != null)
             {
-                // Temporal: comparación directa.
-                // Posteriormente debe reemplazarse por contraseña cifrada.
-                if (usuario.Contraseña != dto.Contrasena)
+                if (!BadyBackend.Helpers.PasswordHelper.VerifyPassword(dto.Contrasena, usuario.Contraseña))
                 {
                     return Unauthorized(new
                     {
                         message = "Correo o contraseña incorrectos."
                     });
+                }
+
+                // Si la contraseña en BD estaba en texto plano, la actualizamos automáticamente a hash BCrypt
+                if (!BadyBackend.Helpers.PasswordHelper.IsHashed(usuario.Contraseña))
+                {
+                    var uDb = await _context.Usuarios.FindAsync(usuario.Id);
+                    if (uDb != null)
+                    {
+                        uDb.Contraseña = BadyBackend.Helpers.PasswordHelper.HashPassword(dto.Contrasena);
+                        await _context.SaveChangesAsync();
+                    }
                 }
 
                 return GenerarRespuestaLogin(
@@ -103,12 +112,23 @@ namespace BadyBackend.Controllers
 
             if (cliente != null)
             {
-                if (cliente.Contraseña != dto.Contrasena)
+                if (!BadyBackend.Helpers.PasswordHelper.VerifyPassword(dto.Contrasena, cliente.Contraseña))
                 {
                     return Unauthorized(new
                     {
                         message = "Correo o contraseña incorrectos."
                     });
+                }
+
+                // Si la contraseña en BD estaba en texto plano, la actualizamos automáticamente a hash BCrypt
+                if (!BadyBackend.Helpers.PasswordHelper.IsHashed(cliente.Contraseña))
+                {
+                    var cDb = await _context.Clientes.FindAsync(cliente.Id);
+                    if (cDb != null)
+                    {
+                        cDb.Contraseña = BadyBackend.Helpers.PasswordHelper.HashPassword(dto.Contrasena);
+                        await _context.SaveChangesAsync();
+                    }
                 }
 
                 return GenerarRespuestaLogin(

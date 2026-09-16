@@ -458,6 +458,9 @@ namespace BadyBackend.Controllers
                         producto.Precio *
                         detalleDto.Cantidad;
 
+                    // Descontar automáticamente del stock disponible
+                    producto.Stock -= detalleDto.Cantidad;
+
                     pedido.Detalle_Pedidos
                         .Add(
                             new Detalle_Pedido
@@ -680,6 +683,16 @@ namespace BadyBackend.Controllers
 
                 pedido.Total = 0;
 
+                // 1. Reintegrar stock de los detalles anteriores
+                foreach (var detalleViejo in pedido.Detalle_Pedidos)
+                {
+                    var prodViejo = await _context.Productos.FindAsync(detalleViejo.Id_producto);
+                    if (prodViejo != null)
+                    {
+                        prodViejo.Stock += detalleViejo.Cantidad;
+                    }
+                }
+
                 _context
                     .Detalle_Pedidos
                     .RemoveRange(
@@ -690,6 +703,7 @@ namespace BadyBackend.Controllers
                 pedido.Detalle_Pedidos
                     .Clear();
 
+                // 2. Descontar stock de los nuevos detalles
                 foreach (
                     var detalleDto
                     in dto.Detalles
@@ -704,6 +718,8 @@ namespace BadyBackend.Controllers
                     var subtotal =
                         producto.Precio *
                         detalleDto.Cantidad;
+
+                    producto.Stock -= detalleDto.Cantidad;
 
                     pedido.Detalle_Pedidos
                         .Add(
@@ -865,22 +881,26 @@ namespace BadyBackend.Controllers
                 });
             }
 
-            pedido.Estado =
-                estadoNormalizado;
+            var estadoAnterior = pedido.Estado;
+            pedido.Estado = estadoNormalizado;
 
-            if (
-                estadoNormalizado ==
-                EstadosPedido.Devuelto
-            )
+            if (estadoNormalizado == EstadosPedido.Devuelto || estadoNormalizado == EstadosPedido.Cancelado)
             {
-                foreach (
-                    var detalle
-                    in pedido.Detalle_Pedidos
-                )
+                // Solo reintegrar stock si no estaba ya cancelado o devuelto previamente
+                if (estadoAnterior != EstadosPedido.Devuelto && estadoAnterior != EstadosPedido.Cancelado)
                 {
-                    detalle.Estado =
-                        EstadosDetallePedido
-                            .Devuelto;
+                    foreach (var detalle in pedido.Detalle_Pedidos)
+                    {
+                        detalle.Estado = estadoNormalizado == EstadosPedido.Devuelto
+                            ? EstadosDetallePedido.Devuelto
+                            : EstadosDetallePedido.Cancelado;
+
+                        var producto = await _context.Productos.FindAsync(detalle.Id_producto);
+                        if (producto != null)
+                        {
+                            producto.Stock += detalle.Cantidad;
+                        }
+                    }
                 }
             }
 
@@ -991,6 +1011,13 @@ namespace BadyBackend.Controllers
                 detalle.Estado =
                     EstadosDetallePedido
                         .Cancelado;
+
+                // Reintegrar stock automáticamente
+                var producto = await _context.Productos.FindAsync(detalle.Id_producto);
+                if (producto != null)
+                {
+                    producto.Stock += detalle.Cantidad;
+                }
             }
 
             await _context
@@ -1284,6 +1311,13 @@ namespace BadyBackend.Controllers
                 detalle.Estado =
                     EstadosDetallePedido
                         .Devuelto;
+
+                // Reintegrar stock automáticamente
+                var producto = await _context.Productos.FindAsync(detalle.Id_producto);
+                if (producto != null)
+                {
+                    producto.Stock += detalle.Cantidad;
+                }
             }
 
             await _context

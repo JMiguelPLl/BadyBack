@@ -1,4 +1,4 @@
-﻿using BadyBackend.Models;
+using BadyBackend.Models;
 using BadyBackend.Data;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -149,8 +149,7 @@ public class UsuariosController : ControllerBase
                 Numero = dto.Numero.Trim(),
                 Email = email,
 
-                // Es recomendable guardar esta contraseña cifrada.
-                Contraseña = dto.Contrasena,
+                Contraseña = BadyBackend.Helpers.PasswordHelper.HashPassword(dto.Contrasena),
 
                 Estado = "Activo"
             };
@@ -259,8 +258,7 @@ public class UsuariosController : ControllerBase
 
             if (!string.IsNullOrWhiteSpace(dto.Contrasena))
             {
-                // Es recomendable guardar esta contraseña cifrada.
-                usuario.Contraseña = dto.Contrasena;
+                usuario.Contraseña = BadyBackend.Helpers.PasswordHelper.HashPassword(dto.Contrasena);
             }
 
             var usuarioRol = await _context.Usuario_Rols

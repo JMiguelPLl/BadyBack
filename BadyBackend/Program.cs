@@ -286,7 +286,7 @@ using (var scope = app.Services.CreateScope())
                 Nombre = "Administrador General",
                 Numero = "70000000",
                 Email = "admin@badys.com",
-                Contraseña = "admin123",
+                Contraseña = BadyBackend.Helpers.PasswordHelper.HashPassword("admin123"),
                 Estado = "Activo"
             };
             context.Usuarios.Add(adminUser);

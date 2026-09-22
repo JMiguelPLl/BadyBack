@@ -859,61 +859,8 @@ namespace BadyBackend.Controllers
             }
 
 
-            var nuevoSaldo =
-                saldoActual -
-                dto.MontoPagado;
-
-
-            var pago =
-                new Pago
-                {
-                    Id_usuario =
-                        dto.IdUsuario,
-
-                    Id_pedido =
-                        dto.IdPedido,
-
-                    Id_tipoPago =
-                        dto.IdTipoPago,
-
-                    Fecha =
-                        DateTime.UtcNow,
-
-                    MontoPagado =
-                        dto.MontoPagado,
-
-                    /*
-                     * Este valor sí lo guardamos
-                     * como fotografía histórica
-                     * del saldo después del pago.
-                     */
-                    SaldoPendiente =
-                        Math.Max(
-                            0,
-                            nuevoSaldo
-                        ),
-
-                    Estado =
-                        EstadosPago.Activo
-                };
-
-
-            await _context.Pagos
-                .AddAsync(pago);
-
-
-            await _context
-                .SaveChangesAsync();
-
-
             // =================================================
-            // GESTIÓN AUTOMÁTICA DE CIERRE DE CAJA
-            // =================================================
-            //
-            // 1. Si el usuario no tiene una caja abierta,
-            //    se abre automáticamente.
-            // 2. Se registra el detalle del pago en la caja.
-            // 3. Se actualizan los totales de Efectivo, QR y Recaudado.
+            // VALIDAR QUE EL USUARIO TENGA CAJA ABIERTA
             // =================================================
             var cajaAbierta =
                 await _context.Cierre_Cajas
@@ -924,102 +871,146 @@ namespace BadyBackend.Controllers
 
             if (cajaAbierta == null)
             {
-                cajaAbierta = new Cierre_Caja
+                return BadRequest(new
                 {
-                    Id_usuario = dto.IdUsuario,
-                    Fecha_Apertura = DateTime.UtcNow,
-                    Estado = EstadosCierreCaja.Abierta,
-                    Total_Efectivo = 0m,
-                    Total_QR = 0m,
-                    Total_Recaudado = 0m,
-                    Observacion = "Apertura automática por registro de pago"
-                };
+                    message = "No puedes registrar cobros porque tu caja está cerrada o aún no ha sido abierta por el Administrador. Solicita la apertura de tu caja.",
+                    codigoError = "CAJA_CERRADA"
+                });
+            }
 
-                await _context.Cierre_Cajas
-                    .AddAsync(cajaAbierta);
+            var nuevoSaldo =
+                saldoActual -
+                dto.MontoPagado;
+
+            await using var transaccion =
+                await _context.Database.BeginTransactionAsync();
+
+            try
+            {
+                var pago =
+                    new Pago
+                    {
+                        Id_usuario =
+                            dto.IdUsuario,
+
+                        Id_pedido =
+                            dto.IdPedido,
+
+                        Id_tipoPago =
+                            dto.IdTipoPago,
+
+                        Fecha =
+                            DateTime.UtcNow,
+
+                        MontoPagado =
+                            dto.MontoPagado,
+
+                        SaldoPendiente =
+                            Math.Max(
+                                0,
+                                nuevoSaldo
+                            ),
+
+                        Estado =
+                            EstadosPago.Activo
+                    };
+
+                await _context.Pagos
+                    .AddAsync(pago);
 
                 await _context
                     .SaveChangesAsync();
-            }
 
-            var detalleCierre = new Cierre_Caja_Detalle
-            {
-                Id_cierre_caja = cajaAbierta.Id,
-                Id_pago = pago.Id,
-                Fecha = pago.Fecha
-            };
-
-            await _context.Cierre_Caja_Detalles
-                .AddAsync(detalleCierre);
-
-            var descTipo =
-                tipoPago.Descripcion?.ToLower() ?? string.Empty;
-
-            if (dto.IdTipoPago == 1 || descTipo.Contains("efectivo"))
-            {
-                cajaAbierta.Total_Efectivo += dto.MontoPagado;
-            }
-            else if (dto.IdTipoPago == 2 || descTipo.Contains("qr"))
-            {
-                cajaAbierta.Total_QR += dto.MontoPagado;
-            }
-            else
-            {
-                cajaAbierta.Total_Efectivo += dto.MontoPagado;
-            }
-
-            cajaAbierta.Total_Recaudado =
-                cajaAbierta.Total_Efectivo + cajaAbierta.Total_QR;
-
-            await _context
-                .SaveChangesAsync();
-
-
-            return Ok(new
-            {
-                message =
-                    "Pago registrado correctamente.",
-
-                pago = new
+                // Registrar en el detalle de la caja abierta
+                var detalleCierre = new Cierre_Caja_Detalle
                 {
-                    id =
-                        pago.Id,
+                    Id_cierre_caja = cajaAbierta.Id,
+                    Id_pago = pago.Id,
+                    Fecha = pago.Fecha
+                };
 
-                    idPedido =
-                        pago.Id_pedido,
+                await _context.Cierre_Caja_Detalles
+                    .AddAsync(detalleCierre);
 
-                    idUsuario =
-                        pago.Id_usuario,
+                var descTipo =
+                    tipoPago.Descripcion?.ToLower() ?? string.Empty;
 
-                    usuario =
-                        usuario.Nombre,
-
-                    idTipoPago =
-                        pago.Id_tipoPago,
-
-                    tipoPago =
-                        tipoPago.Descripcion,
-
-                    fecha =
-                        pago.Fecha,
-
-                    montoPagado =
-                        pago.MontoPagado,
-
-                    saldoPendiente =
-                        pago.SaldoPendiente,
-
-                    estadoDeuda =
-                        pago.SaldoPendiente <= 0
-                            ? EstadosDeuda
-                                .Pagado
-                            : EstadosDeuda
-                                .Pendiente,
-
-                    idCierreCaja =
-                        cajaAbierta.Id
+                if (dto.IdTipoPago == 1 || descTipo.Contains("efectivo"))
+                {
+                    cajaAbierta.Total_Efectivo += dto.MontoPagado;
                 }
-            });
+                else if (dto.IdTipoPago == 2 || descTipo.Contains("qr"))
+                {
+                    cajaAbierta.Total_QR += dto.MontoPagado;
+                }
+                else
+                {
+                    cajaAbierta.Total_Efectivo += dto.MontoPagado;
+                }
+
+                cajaAbierta.Total_Recaudado =
+                    cajaAbierta.Total_Efectivo + cajaAbierta.Total_QR;
+
+                await _context
+                    .SaveChangesAsync();
+
+                await transaccion.CommitAsync();
+
+                return Ok(new
+                {
+                    message =
+                        "Pago registrado correctamente.",
+
+                    pago = new
+                    {
+                        id =
+                            pago.Id,
+
+                        idPedido =
+                            pago.Id_pedido,
+
+                        idUsuario =
+                            pago.Id_usuario,
+
+                        usuario =
+                            usuario.Nombre,
+
+                        idTipoPago =
+                            pago.Id_tipoPago,
+
+                        tipoPago =
+                            tipoPago.Descripcion,
+
+                        fecha =
+                            pago.Fecha,
+
+                        montoPagado =
+                            pago.MontoPagado,
+
+                        saldoPendiente =
+                            pago.SaldoPendiente,
+
+                        estadoDeuda =
+                            pago.SaldoPendiente <= 0
+                                ? EstadosDeuda
+                                    .Pagado
+                                : EstadosDeuda
+                                    .Pendiente,
+
+                        idCierreCaja =
+                            cajaAbierta.Id
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                await transaccion.RollbackAsync();
+                return StatusCode(500, new
+                {
+                    message = "Ocurrió un error interno al registrar el pago.",
+                    error = ex.Message
+                });
+            }
         }
 
 
@@ -2412,8 +2403,229 @@ namespace BadyBackend.Controllers
             caja.Total_QR = totalQR;
             caja.Total_Recaudado = totalEfectivo + totalQR;
 
-            await _context
-                .SaveChangesAsync();
+            await _context.SaveChangesAsync();
+        }
+
+        // =====================================================
+        // REPORTES ADMINISTRATIVOS DE PAGOS (TODOS, EFECTIVO, QR)
+        // =====================================================
+
+        /*
+         * GET:
+         * api/Pago/Reportes/Pagos
+         * api/Pago/Reportes/Pagos?tipoPago=QR
+         * api/Pago/Reportes/Pagos?tipoPago=Efectivo
+         * api/Pago/Reportes/Pagos?fechaDesde=2026-08-01&fechaHasta=2026-08-31
+         * api/Pago/Reportes/Pagos?idUsuario=2
+         * api/Pago/Reportes/Pagos?idCliente=5
+         */
+        [Authorize(Roles = "Administrador")]
+        [HttpGet("Reportes/Pagos")]
+        public async Task<ActionResult<ReportePagosResponseDto>> ObtenerReportePagos(
+            [FromQuery] string? tipoPago,
+            [FromQuery] int? idUsuario,
+            [FromQuery] int? idCliente,
+            [FromQuery] DateTime? fechaDesde,
+            [FromQuery] DateTime? fechaHasta)
+        {
+            var consulta = _context.Pagos
+                .AsNoTracking()
+                .Include(p => p.Usuario)
+                .Include(p => p.TipoPago)
+                .Include(p => p.Pedido)
+                    .ThenInclude(ped => ped.Cliente)
+                .Include(p => p.Pedido)
+                    .ThenInclude(ped => ped.Sucursal)
+                .Where(p => p.Estado != EstadosPago.Anulado)
+                .AsQueryable();
+
+            if (idUsuario.HasValue)
+            {
+                consulta = consulta.Where(p => p.Id_usuario == idUsuario.Value);
+            }
+
+            if (idCliente.HasValue)
+            {
+                consulta = consulta.Where(p => p.Pedido.Id_cliente == idCliente.Value);
+            }
+
+            if (fechaDesde.HasValue)
+            {
+                var desde = fechaDesde.Value.Date;
+                consulta = consulta.Where(p => p.Fecha >= desde);
+            }
+
+            if (fechaHasta.HasValue)
+            {
+                var hasta = fechaHasta.Value.Date.AddDays(1);
+                consulta = consulta.Where(p => p.Fecha < hasta);
+            }
+
+            string metodoNormalizado = "Todos";
+
+            if (!string.IsNullOrWhiteSpace(tipoPago))
+            {
+                var tp = tipoPago.Trim().ToLower();
+                if (tp.Contains("qr"))
+                {
+                    metodoNormalizado = "QR";
+                    consulta = consulta.Where(p => p.Id_tipoPago == 2 || (p.TipoPago != null && p.TipoPago.Descripcion.ToLower().Contains("qr")));
+                }
+                else if (tp.Contains("efectivo"))
+                {
+                    metodoNormalizado = "Efectivo";
+                    consulta = consulta.Where(p => p.Id_tipoPago == 1 || (p.TipoPago != null && p.TipoPago.Descripcion.ToLower().Contains("efectivo")));
+                }
+            }
+
+            var pagos = await consulta
+                .OrderByDescending(p => p.Fecha)
+                .ThenByDescending(p => p.Id)
+                .ToListAsync();
+
+            decimal totalEfectivo = 0m;
+            decimal totalQR = 0m;
+            var itemsDto = new List<ReportePagoItemDto>();
+
+            foreach (var p in pagos)
+            {
+                var desc = p.TipoPago?.Descripcion?.ToLower() ?? string.Empty;
+                var esEfectivo = p.Id_tipoPago == 1 || desc.Contains("efectivo");
+                var esQR = p.Id_tipoPago == 2 || desc.Contains("qr");
+
+                if (esEfectivo)
+                    totalEfectivo += p.MontoPagado;
+                else if (esQR)
+                    totalQR += p.MontoPagado;
+                else
+                    totalEfectivo += p.MontoPagado;
+
+                itemsDto.Add(new ReportePagoItemDto
+                {
+                    IdPago = p.Id,
+                    IdPedido = p.Id_pedido,
+                    IdCliente = p.Pedido?.Id_cliente ?? 0,
+                    Cliente = p.Pedido?.Cliente?.Nombre ?? string.Empty,
+                    IdSucursal = p.Pedido?.Id_sucursal ?? 0,
+                    Sucursal = p.Pedido?.Sucursal?.Nombre ?? string.Empty,
+                    IdUsuario = p.Id_usuario,
+                    Usuario = p.Usuario?.Nombre ?? string.Empty,
+                    IdTipoPago = p.Id_tipoPago,
+                    TipoPago = p.TipoPago?.Descripcion ?? string.Empty,
+                    MontoPagado = p.MontoPagado,
+                    SaldoPendiente = p.SaldoPendiente,
+                    FechaPago = p.Fecha,
+                    EstadoPago = p.Estado
+                });
+            }
+
+            return Ok(new ReportePagosResponseDto
+            {
+                Titulo = metodoNormalizado == "Todos"
+                    ? "Reporte General de Pagos"
+                    : $"Reporte de Pagos en {metodoNormalizado}",
+                MetodoPago = metodoNormalizado,
+                FechaDesde = fechaDesde,
+                FechaHasta = fechaHasta,
+                TotalCantidadPagos = itemsDto.Count,
+                TotalMontoRecaudado = totalEfectivo + totalQR,
+                TotalEfectivo = totalEfectivo,
+                TotalQR = totalQR,
+                Pagos = itemsDto
+            });
+        }
+
+        /*
+         * GET: api/Pago/Reportes/Efectivo
+         */
+        [Authorize(Roles = "Administrador")]
+        [HttpGet("Reportes/Efectivo")]
+        public async Task<ActionResult<ReportePagosResponseDto>> ObtenerReporteEfectivo(
+            [FromQuery] int? idUsuario,
+            [FromQuery] int? idCliente,
+            [FromQuery] DateTime? fechaDesde,
+            [FromQuery] DateTime? fechaHasta)
+        {
+            return await ObtenerReportePagos("Efectivo", idUsuario, idCliente, fechaDesde, fechaHasta);
+        }
+
+        /*
+         * GET: api/Pago/Reportes/QR
+         */
+        [Authorize(Roles = "Administrador")]
+        [HttpGet("Reportes/QR")]
+        public async Task<ActionResult<ReportePagosResponseDto>> ObtenerReporteQR(
+            [FromQuery] int? idUsuario,
+            [FromQuery] int? idCliente,
+            [FromQuery] DateTime? fechaDesde,
+            [FromQuery] DateTime? fechaHasta)
+        {
+            return await ObtenerReportePagos("QR", idUsuario, idCliente, fechaDesde, fechaHasta);
+        }
+
+        /*
+         * GET: api/Pago/Reportes/ResumenMetodosPago
+         */
+        [Authorize(Roles = "Administrador")]
+        [HttpGet("Reportes/ResumenMetodosPago")]
+        public async Task<ActionResult<ResumenMetodosPagoDto>> ObtenerResumenMetodosPago(
+            [FromQuery] DateTime? fechaDesde,
+            [FromQuery] DateTime? fechaHasta)
+        {
+            var consulta = _context.Pagos
+                .AsNoTracking()
+                .Include(p => p.TipoPago)
+                .Where(p => p.Estado != EstadosPago.Anulado)
+                .AsQueryable();
+
+            if (fechaDesde.HasValue)
+            {
+                var desde = fechaDesde.Value.Date;
+                consulta = consulta.Where(p => p.Fecha >= desde);
+            }
+
+            if (fechaHasta.HasValue)
+            {
+                var hasta = fechaHasta.Value.Date.AddDays(1);
+                consulta = consulta.Where(p => p.Fecha < hasta);
+            }
+
+            var pagos = await consulta.ToListAsync();
+
+            decimal totalEfectivo = 0m;
+            int cantidadEfectivo = 0;
+            decimal totalQR = 0m;
+            int cantidadQR = 0;
+
+            foreach (var p in pagos)
+            {
+                var desc = p.TipoPago?.Descripcion?.ToLower() ?? string.Empty;
+                if (p.Id_tipoPago == 2 || desc.Contains("qr"))
+                {
+                    totalQR += p.MontoPagado;
+                    cantidadQR++;
+                }
+                else
+                {
+                    totalEfectivo += p.MontoPagado;
+                    cantidadEfectivo++;
+                }
+            }
+
+            var totalGeneral = totalEfectivo + totalQR;
+            var cantidadTotal = cantidadEfectivo + cantidadQR;
+
+            return Ok(new ResumenMetodosPagoDto
+            {
+                TotalGeneral = totalGeneral,
+                CantidadPagosTotal = cantidadTotal,
+                TotalEfectivo = totalEfectivo,
+                CantidadPagosEfectivo = cantidadEfectivo,
+                PorcentajeEfectivo = totalGeneral > 0 ? Math.Round((totalEfectivo / totalGeneral) * 100m, 2) : 0m,
+                TotalQR = totalQR,
+                CantidadPagosQR = cantidadQR,
+                PorcentajeQR = totalGeneral > 0 ? Math.Round((totalQR / totalGeneral) * 100m, 2) : 0m
+            });
         }
 
 

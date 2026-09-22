@@ -453,6 +453,412 @@ namespace BadyBackend.Controllers
 
 
         // =====================================================
+        // ADMIN: ESTADO DE CAJAS DE TODOS LOS DISTRIBUIDORES
+        // =====================================================
+        /*
+         * GET: api/CierreCaja/Admin/EstadoCajas
+         */
+        [Authorize(Roles = "Administrador")]
+        [HttpGet("Admin/EstadoCajas")]
+        public async Task<ActionResult<IEnumerable<EstadoCajaDistribuidorDto>>> ObtenerEstadoCajasDistribuidores()
+        {
+            var usuariosQuery = from u in _context.Usuarios.AsNoTracking()
+                                join ur in _context.Usuario_Rols.AsNoTracking() on u.Id equals ur.id_usuario
+                                join r in _context.Rols.AsNoTracking() on ur.id_rol equals r.Id
+                                where u.Estado == "Activo" && !r.Descripcion.ToLower().Contains("cliente")
+                                select new
+                                {
+                                    u.Id,
+                                    u.Nombre,
+                                    u.Email,
+                                    Rol = r.Descripcion
+                                };
+
+            var usuarios = await usuariosQuery.Distinct().ToListAsync();
+
+            var cajasAbiertas = await _context.Cierre_Cajas
+                .AsNoTracking()
+                .Include(c => c.Cierre_Caja_Detalles)
+                    .ThenInclude(d => d.Pago)
+                        .ThenInclude(p => p.TipoPago)
+                .Where(c => c.Estado == EstadosCierreCaja.Abierta)
+                .ToListAsync();
+
+            var resultado = new List<EstadoCajaDistribuidorDto>();
+
+            foreach (var u in usuarios)
+            {
+                var cajaAbierta = cajasAbiertas.FirstOrDefault(c => c.Id_usuario == u.Id);
+                if (cajaAbierta != null)
+                {
+                    var pagos = cajaAbierta.Cierre_Caja_Detalles
+                        .Select(d => d.Pago)
+                        .Where(p => p != null && p.Estado != EstadosPago.Anulado)
+                        .ToList();
+
+                    decimal totalEfectivo = 0m;
+                    decimal totalQR = 0m;
+
+                    foreach (var p in pagos)
+                    {
+                        var desc = p.TipoPago?.Descripcion?.ToLower() ?? string.Empty;
+                        if (p.Id_tipoPago == 1 || desc.Contains("efectivo"))
+                        {
+                            totalEfectivo += p.MontoPagado;
+                        }
+                        else if (p.Id_tipoPago == 2 || desc.Contains("qr"))
+                        {
+                            totalQR += p.MontoPagado;
+                        }
+                        else
+                        {
+                            totalEfectivo += p.MontoPagado;
+                        }
+                    }
+
+                    resultado.Add(new EstadoCajaDistribuidorDto
+                    {
+                        IdUsuario = u.Id,
+                        Usuario = u.Nombre,
+                        Email = u.Email,
+                        Rol = u.Rol,
+                        TieneCajaAbierta = true,
+                        IdCierreCajaAbierta = cajaAbierta.Id,
+                        FechaApertura = cajaAbierta.Fecha_Apertura,
+                        TotalEfectivo = totalEfectivo,
+                        TotalQR = totalQR,
+                        TotalRecaudado = totalEfectivo + totalQR,
+                        CantidadPagos = pagos.Count
+                    });
+                }
+                else
+                {
+                    resultado.Add(new EstadoCajaDistribuidorDto
+                    {
+                        IdUsuario = u.Id,
+                        Usuario = u.Nombre,
+                        Email = u.Email,
+                        Rol = u.Rol,
+                        TieneCajaAbierta = false,
+                        IdCierreCajaAbierta = null,
+                        FechaApertura = null,
+                        TotalEfectivo = 0m,
+                        TotalQR = 0m,
+                        TotalRecaudado = 0m,
+                        CantidadPagos = 0
+                    });
+                }
+            }
+
+            return Ok(resultado);
+        }
+
+
+        // =====================================================
+        // ADMIN: ABRIR CAJA DE UN USUARIO ESPECÍFICO
+        // =====================================================
+        /*
+         * POST: api/CierreCaja/Admin/AbrirUsuario/{idUsuario:int}
+         */
+        [Authorize(Roles = "Administrador")]
+        [HttpPost("Admin/AbrirUsuario/{idUsuario:int}")]
+        public async Task<IActionResult> AdminAbrirCajaUsuario(int idUsuario, [FromBody] AperturaCajaDto? dto)
+        {
+            var usuario = await _context.Usuarios.FirstOrDefaultAsync(u => u.Id == idUsuario);
+            if (usuario == null)
+            {
+                return NotFound(new
+                {
+                    message = $"El usuario con ID {idUsuario} no existe."
+                });
+            }
+
+            if (usuario.Estado != "Activo")
+            {
+                return BadRequest(new
+                {
+                    message = $"El usuario {usuario.Nombre} se encuentra en estado '{usuario.Estado}' y no puede tener una caja abierta."
+                });
+            }
+
+            var cajaAbiertaExistente = await _context.Cierre_Cajas
+                .FirstOrDefaultAsync(c =>
+                    c.Id_usuario == idUsuario &&
+                    c.Estado == EstadosCierreCaja.Abierta
+                );
+
+            if (cajaAbiertaExistente != null)
+            {
+                return BadRequest(new
+                {
+                    message = $"El usuario {usuario.Nombre} ya tiene una caja abierta actualmente.",
+                    idCierreCaja = cajaAbiertaExistente.Id
+                });
+            }
+
+            var nuevaCaja = new Cierre_Caja
+            {
+                Id_usuario = idUsuario,
+                Fecha_Apertura = DateTime.UtcNow,
+                Fecha_Cierre = null,
+                Total_Efectivo = 0m,
+                Total_QR = 0m,
+                Total_Recaudado = 0m,
+                Estado = EstadosCierreCaja.Abierta,
+                Observacion = string.IsNullOrWhiteSpace(dto?.Observacion)
+                    ? "Apertura realizada por Administrador."
+                    : $"[Admin]: {dto.Observacion.Trim()}"
+            };
+
+            await _context.Cierre_Cajas.AddAsync(nuevaCaja);
+            await _context.SaveChangesAsync();
+
+            return Ok(new
+            {
+                message = $"Caja abierta correctamente para el usuario {usuario.Nombre}.",
+                caja = new CierreCajaRespuestaDto
+                {
+                    Id = nuevaCaja.Id,
+                    IdUsuario = nuevaCaja.Id_usuario,
+                    Usuario = usuario.Nombre,
+                    CorreoUsuario = usuario.Email,
+                    FechaApertura = nuevaCaja.Fecha_Apertura,
+                    FechaCierre = nuevaCaja.Fecha_Cierre,
+                    TotalEfectivo = nuevaCaja.Total_Efectivo,
+                    TotalQR = nuevaCaja.Total_QR,
+                    TotalRecaudado = nuevaCaja.Total_Recaudado,
+                    Estado = nuevaCaja.Estado,
+                    Observacion = nuevaCaja.Observacion,
+                    CantidadPagos = 0
+                }
+            });
+        }
+
+
+        // =====================================================
+        // ADMIN: CERRAR CAJA DE UN USUARIO ESPECÍFICO
+        // =====================================================
+        /*
+         * POST: api/CierreCaja/Admin/CerrarUsuario/{idUsuario:int}
+         */
+        [Authorize(Roles = "Administrador")]
+        [HttpPost("Admin/CerrarUsuario/{idUsuario:int}")]
+        public async Task<IActionResult> AdminCerrarCajaUsuario(int idUsuario, [FromBody] CerrarCajaDto? dto)
+        {
+            var usuario = await _context.Usuarios.FirstOrDefaultAsync(u => u.Id == idUsuario);
+            if (usuario == null)
+            {
+                return NotFound(new
+                {
+                    message = $"El usuario con ID {idUsuario} no existe."
+                });
+            }
+
+            var caja = await _context.Cierre_Cajas
+                .Include(c => c.Usuario)
+                .Include(c => c.Cierre_Caja_Detalles)
+                    .ThenInclude(d => d.Pago)
+                        .ThenInclude(p => p.TipoPago)
+                .FirstOrDefaultAsync(c =>
+                    c.Id_usuario == idUsuario &&
+                    c.Estado == EstadosCierreCaja.Abierta
+                );
+
+            if (caja == null)
+            {
+                return NotFound(new
+                {
+                    message = $"El usuario {usuario.Nombre} no tiene ninguna caja abierta para cerrar."
+                });
+            }
+
+            var obs = string.IsNullOrWhiteSpace(dto?.Observacion)
+                ? "Cierre realizado por Administrador."
+                : $"[Admin]: {dto.Observacion.Trim()}";
+
+            return await EjecutarCierreCaja(caja, obs);
+        }
+
+
+        // =====================================================
+        // ADMIN: ABRIR CAJAS DE TODOS LOS DISTRIBUIDORES
+        // =====================================================
+        /*
+         * POST: api/CierreCaja/Admin/AbrirTodos
+         */
+        [Authorize(Roles = "Administrador")]
+        [HttpPost("Admin/AbrirTodos")]
+        public async Task<ActionResult<CierreMasivoRespuestaDto>> AdminAbrirTodos([FromBody] AperturaCajaDto? dto)
+        {
+            var usuariosQuery = from u in _context.Usuarios
+                                join ur in _context.Usuario_Rols on u.Id equals ur.id_usuario
+                                join r in _context.Rols on ur.id_rol equals r.Id
+                                where u.Estado == "Activo" && !r.Descripcion.ToLower().Contains("cliente")
+                                select u;
+
+            var usuarios = await usuariosQuery.Distinct().ToListAsync();
+
+            var idsUsuariosConCajaAbierta = await _context.Cierre_Cajas
+                .Where(c => c.Estado == EstadosCierreCaja.Abierta)
+                .Select(c => c.Id_usuario)
+                .ToListAsync();
+
+            var nuevasCajas = new List<Cierre_Caja>();
+            var fecha = DateTime.UtcNow;
+            var observacion = string.IsNullOrWhiteSpace(dto?.Observacion)
+                ? "Apertura masiva realizada por Administrador."
+                : $"[Admin Masivo]: {dto.Observacion.Trim()}";
+
+            foreach (var u in usuarios)
+            {
+                if (!idsUsuariosConCajaAbierta.Contains(u.Id))
+                {
+                    nuevasCajas.Add(new Cierre_Caja
+                    {
+                        Id_usuario = u.Id,
+                        Fecha_Apertura = fecha,
+                        Fecha_Cierre = null,
+                        Total_Efectivo = 0m,
+                        Total_QR = 0m,
+                        Total_Recaudado = 0m,
+                        Estado = EstadosCierreCaja.Abierta,
+                        Observacion = observacion
+                    });
+                }
+            }
+
+            if (nuevasCajas.Any())
+            {
+                await _context.Cierre_Cajas.AddRangeAsync(nuevasCajas);
+                await _context.SaveChangesAsync();
+            }
+
+            var resultadoDetalle = new List<CierreCajaRespuestaDto>();
+            foreach (var c in nuevasCajas)
+            {
+                var usr = usuarios.FirstOrDefault(u => u.Id == c.Id_usuario);
+                resultadoDetalle.Add(new CierreCajaRespuestaDto
+                {
+                    Id = c.Id,
+                    IdUsuario = c.Id_usuario,
+                    Usuario = usr?.Nombre ?? string.Empty,
+                    CorreoUsuario = usr?.Email,
+                    FechaApertura = c.Fecha_Apertura,
+                    FechaCierre = c.Fecha_Cierre,
+                    TotalEfectivo = c.Total_Efectivo,
+                    TotalQR = c.Total_QR,
+                    TotalRecaudado = c.Total_Recaudado,
+                    Estado = c.Estado,
+                    Observacion = c.Observacion,
+                    CantidadPagos = 0
+                });
+            }
+
+            return Ok(new CierreMasivoRespuestaDto
+            {
+                Mensaje = $"Se abrieron exitosamente {nuevasCajas.Count} cajas de {usuarios.Count} usuarios activos.",
+                TotalProcesados = usuarios.Count,
+                CajasAfectadas = nuevasCajas.Count,
+                DetalleCajas = resultadoDetalle
+            });
+        }
+
+
+        // =====================================================
+        // ADMIN: CERRAR CAJAS DE TODOS LOS USUARIOS
+        // =====================================================
+        /*
+         * POST: api/CierreCaja/Admin/CerrarTodos
+         */
+        [Authorize(Roles = "Administrador")]
+        [HttpPost("Admin/CerrarTodos")]
+        public async Task<ActionResult<CierreMasivoRespuestaDto>> AdminCerrarTodos([FromBody] CerrarCajaDto? dto)
+        {
+            var cajasAbiertas = await _context.Cierre_Cajas
+                .Include(c => c.Usuario)
+                .Include(c => c.Cierre_Caja_Detalles)
+                    .ThenInclude(d => d.Pago)
+                        .ThenInclude(p => p.TipoPago)
+                .Where(c => c.Estado == EstadosCierreCaja.Abierta)
+                .ToListAsync();
+
+            var fechaCierre = DateTime.UtcNow;
+            var observacionAdicional = string.IsNullOrWhiteSpace(dto?.Observacion)
+                ? "Cierre masivo realizado por Administrador."
+                : $"[Admin Masivo]: {dto.Observacion.Trim()}";
+
+            var detalleCerradas = new List<CierreCajaRespuestaDto>();
+
+            foreach (var caja in cajasAbiertas)
+            {
+                var pagos = caja.Cierre_Caja_Detalles
+                    .Select(d => d.Pago)
+                    .Where(p => p != null && p.Estado != EstadosPago.Anulado)
+                    .ToList();
+
+                decimal totalEfectivo = 0m;
+                decimal totalQR = 0m;
+
+                foreach (var p in pagos)
+                {
+                    var desc = p.TipoPago?.Descripcion?.ToLower() ?? string.Empty;
+                    if (p.Id_tipoPago == 1 || desc.Contains("efectivo"))
+                    {
+                        totalEfectivo += p.MontoPagado;
+                    }
+                    else if (p.Id_tipoPago == 2 || desc.Contains("qr"))
+                    {
+                        totalQR += p.MontoPagado;
+                    }
+                    else
+                    {
+                        totalEfectivo += p.MontoPagado;
+                    }
+                }
+
+                caja.Total_Efectivo = totalEfectivo;
+                caja.Total_QR = totalQR;
+                caja.Total_Recaudado = totalEfectivo + totalQR;
+                caja.Fecha_Cierre = fechaCierre;
+                caja.Estado = EstadosCierreCaja.Cerrada;
+
+                caja.Observacion = string.IsNullOrWhiteSpace(caja.Observacion)
+                    ? observacionAdicional
+                    : $"{caja.Observacion} | {observacionAdicional}";
+
+                detalleCerradas.Add(new CierreCajaRespuestaDto
+                {
+                    Id = caja.Id,
+                    IdUsuario = caja.Id_usuario,
+                    Usuario = caja.Usuario?.Nombre ?? string.Empty,
+                    CorreoUsuario = caja.Usuario?.Email,
+                    FechaApertura = caja.Fecha_Apertura,
+                    FechaCierre = caja.Fecha_Cierre,
+                    TotalEfectivo = caja.Total_Efectivo,
+                    TotalQR = caja.Total_QR,
+                    TotalRecaudado = caja.Total_Recaudado,
+                    Estado = caja.Estado,
+                    Observacion = caja.Observacion,
+                    CantidadPagos = pagos.Count
+                });
+            }
+
+            if (cajasAbiertas.Any())
+            {
+                await _context.SaveChangesAsync();
+            }
+
+            return Ok(new CierreMasivoRespuestaDto
+            {
+                Mensaje = $"Se cerraron exitosamente {cajasAbiertas.Count} cajas abiertas.",
+                TotalProcesados = cajasAbiertas.Count,
+                CajasAfectadas = cajasAbiertas.Count,
+                DetalleCajas = detalleCerradas
+            });
+        }
+
+
+        // =====================================================
         // MÉTODOS PRIVADOS AUXILIARES
         // =====================================================
 

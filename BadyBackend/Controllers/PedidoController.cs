@@ -629,7 +629,8 @@ namespace BadyBackend.Controllers
                 await ValidarPedidoAsync(
                     dto.IdCliente,
                     dto.IdSucursal,
-                    dto.Detalles
+                    dto.Detalles,
+                    pedido
                 );
 
             if (errorValidacion is not null)
@@ -1767,7 +1768,8 @@ namespace BadyBackend.Controllers
                 int idSucursal,
                 List<
                     CrearDetallePedidoDto
-                >? detalles)
+                >? detalles,
+                Pedido? pedidoExistente = null)
         {
             var cliente =
                 await _context.Clientes
@@ -1918,13 +1920,19 @@ namespace BadyBackend.Controllers
                         $"El producto {producto.Nombre} se encuentra inactivo.";
                 }
 
+                var cantidadPrevia = pedidoExistente?.Detalle_Pedidos?
+                    .Where(d => d.Id_producto == detalle.IdProducto)
+                    .Sum(d => d.Cantidad) ?? 0;
+
+                var stockDisponible = producto.Stock + cantidadPrevia;
+
                 if (
-                    producto.Stock <
+                    stockDisponible <
                     detalle.Cantidad
                 )
                 {
                     return
-                        $"Stock insuficiente para {producto.Nombre}. Disponible: {producto.Stock}.";
+                        $"Stock insuficiente para {producto.Nombre}. Disponible: {stockDisponible}.";
                 }
             }
 

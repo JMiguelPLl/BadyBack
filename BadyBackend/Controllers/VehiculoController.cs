@@ -1,4 +1,4 @@
-﻿using BadyBackend.Data;
+using BadyBackend.Data;
 using BadyBackend.DTOs;
 using BadyBackend.Models;
 using Microsoft.AspNetCore.Authorization;
@@ -88,18 +88,13 @@ namespace BadyBackend.Controllers
             if (!ModelState.IsValid)
                 return ValidationProblem(ModelState);
 
-            var placa = string.IsNullOrWhiteSpace(dto.Placa)
-                ? null
-                : dto.Placa.Trim().ToUpperInvariant();
+            var placa = dto.Placa.Trim().ToUpperInvariant();
 
-            if (placa is not null)
-            {
-                var existe = await _context.Vehiculos.AnyAsync(v =>
-                    v.Placa != null && v.Placa.ToUpper() == placa);
+            var existe = await _context.Vehiculos.AnyAsync(v =>
+                v.Placa != null && v.Placa.ToUpper() == placa);
 
-                if (existe)
-                    return Conflict(new { message = "Ya existe un vehículo con esa placa." });
-            }
+            if (existe)
+                return Conflict(new { message = $"Ya existe un vehículo registrado con la placa '{placa}'." });
 
             var vehiculo = new Vehiculo
             {
@@ -137,18 +132,13 @@ namespace BadyBackend.Controllers
             if (vehiculo is null)
                 return NotFound(new { message = "El vehículo no existe." });
 
-            var placa = string.IsNullOrWhiteSpace(dto.Placa)
-                ? null
-                : dto.Placa.Trim().ToUpperInvariant();
+            var placa = dto.Placa.Trim().ToUpperInvariant();
 
-            if (placa is not null)
-            {
-                var existe = await _context.Vehiculos.AnyAsync(v =>
-                    v.Id != id && v.Placa != null && v.Placa.ToUpper() == placa);
+            var existe = await _context.Vehiculos.AnyAsync(v =>
+                v.Id != id && v.Placa != null && v.Placa.ToUpper() == placa);
 
-                if (existe)
-                    return Conflict(new { message = "Ya existe otro vehículo con esa placa." });
-            }
+            if (existe)
+                return Conflict(new { message = $"Ya existe otro vehículo registrado con la placa '{placa}'." });
 
             vehiculo.Marca = dto.Marca.Trim();
             vehiculo.Placa = placa;

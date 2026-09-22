@@ -73,4 +73,27 @@ namespace BadyBackend.DTOs
         public decimal TotalQRGeneral { get; set; }
         public decimal GranTotalRecaudado { get; set; }
     }
+
+    public class EstadoCajaDistribuidorDto
+    {
+        public int IdUsuario { get; set; }
+        public string Usuario { get; set; } = string.Empty;
+        public string Email { get; set; } = string.Empty;
+        public string Rol { get; set; } = string.Empty;
+        public bool TieneCajaAbierta { get; set; }
+        public int? IdCierreCajaAbierta { get; set; }
+        public DateTime? FechaApertura { get; set; }
+        public decimal TotalEfectivo { get; set; }
+        public decimal TotalQR { get; set; }
+        public decimal TotalRecaudado { get; set; }
+        public int CantidadPagos { get; set; }
+    }
+
+    public class CierreMasivoRespuestaDto
+    {
+        public string Mensaje { get; set; } = string.Empty;
+        public int TotalProcesados { get; set; }
+        public int CajasAfectadas { get; set; }
+        public List<CierreCajaRespuestaDto> DetalleCajas { get; set; } = new();
+    }
 }

@@ -1,4 +1,4 @@
-﻿using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations;
 
 namespace BadyBackend.DTOs
 {
@@ -353,4 +353,52 @@ namespace BadyBackend.DTOs
             set;
         } = new();
     }
+
+    // =========================================================
+    // DTOS PARA REPORTES DE PAGOS (EFECTIVO Y QR)
+    // =========================================================
+
+    public class ReportePagoItemDto
+    {
+        public int IdPago { get; set; }
+        public int IdPedido { get; set; }
+        public int IdCliente { get; set; }
+        public string Cliente { get; set; } = string.Empty;
+        public int IdSucursal { get; set; }
+        public string Sucursal { get; set; } = string.Empty;
+        public int IdUsuario { get; set; }
+        public string Usuario { get; set; } = string.Empty;
+        public int IdTipoPago { get; set; }
+        public string TipoPago { get; set; } = string.Empty;
+        public decimal MontoPagado { get; set; }
+        public decimal SaldoPendiente { get; set; }
+        public DateTime FechaPago { get; set; }
+        public string EstadoPago { get; set; } = string.Empty;
+    }
+
+    public class ReportePagosResponseDto
+    {
+        public string Titulo { get; set; } = string.Empty;
+        public string MetodoPago { get; set; } = "Todos";
+        public DateTime? FechaDesde { get; set; }
+        public DateTime? FechaHasta { get; set; }
+        public int TotalCantidadPagos { get; set; }
+        public decimal TotalMontoRecaudado { get; set; }
+        public decimal TotalEfectivo { get; set; }
+        public decimal TotalQR { get; set; }
+        public List<ReportePagoItemDto> Pagos { get; set; } = new();
+    }
+
+    public class ResumenMetodosPagoDto
+    {
+        public decimal TotalGeneral { get; set; }
+        public int CantidadPagosTotal { get; set; }
+        public decimal TotalEfectivo { get; set; }
+        public int CantidadPagosEfectivo { get; set; }
+        public decimal PorcentajeEfectivo { get; set; }
+        public decimal TotalQR { get; set; }
+        public int CantidadPagosQR { get; set; }
+        public decimal PorcentajeQR { get; set; }
+    }
 }
+

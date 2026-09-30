@@ -8,8 +8,7 @@ namespace BadyBackend.DTOs
             [Range(1, int.MaxValue, ErrorMessage = "El cliente es obligatorio.")]
             public int IdCliente { get; set; }
 
-            [Range(1, int.MaxValue, ErrorMessage = "La sucursal es obligatoria.")]
-            public int IdSucursal { get; set; }
+            public int? IdSucursal { get; set; }
 
             [StringLength(200)]
             public string? Observacion { get; set; }
@@ -67,8 +66,7 @@ namespace BadyBackend.DTOs
             [Range(1, int.MaxValue, ErrorMessage = "El cliente es obligatorio.")]
             public int IdCliente { get; set; }
 
-            [Range(1, int.MaxValue, ErrorMessage = "La sucursal es obligatoria.")]
-            public int IdSucursal { get; set; }
+            public int? IdSucursal { get; set; }
 
             [StringLength(200)]
             public string? Observacion { get; set; }

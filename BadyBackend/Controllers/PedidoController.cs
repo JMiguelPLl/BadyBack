@@ -391,6 +391,33 @@ namespace BadyBackend.Controllers
                 });
             }
 
+            // Resolver sucursal: si no se envió o es <= 0, buscar una activa o crear una por defecto
+            int idSucursalFinal = dto.IdSucursal ?? 0;
+            if (idSucursalFinal <= 0)
+            {
+                var sucursalExistente = await _context.Sucursales
+                    .FirstOrDefaultAsync(s => s.Id_cliente == dto.IdCliente && s.Estado == "Activo");
+
+                if (sucursalExistente != null)
+                {
+                    idSucursalFinal = sucursalExistente.Id;
+                }
+                else
+                {
+                    var nuevaSucursal = new Sucursal
+                    {
+                        Id_cliente = dto.IdCliente,
+                        Nombre = "Principal / Mostrador",
+                        Descripcion = "Sucursal por defecto para pedidos de mostrador y entregas",
+                        Ubicacion = "Mostrador / Local",
+                        Estado = "Activo"
+                    };
+                    await _context.Sucursales.AddAsync(nuevaSucursal);
+                    await _context.SaveChangesAsync();
+                    idSucursalFinal = nuevaSucursal.Id;
+                }
+            }
+
             var idsProductos =
                 dto.Detalles
                     .Select(d =>
@@ -422,7 +449,7 @@ namespace BadyBackend.Controllers
                             dto.IdCliente,
 
                         Id_sucursal =
-                            dto.IdSucursal,
+                            idSucursalFinal,
 
                         Fecha =
                             DateTime.UtcNow,
@@ -642,6 +669,40 @@ namespace BadyBackend.Controllers
                 });
             }
 
+            // Resolver sucursal para actualizar: si no se envió o <= 0, mantener la del pedido o resolver una activa
+            int idSucursalFinal = dto.IdSucursal ?? 0;
+            if (idSucursalFinal <= 0)
+            {
+                if (pedido.Id_sucursal > 0 && pedido.Id_cliente == dto.IdCliente)
+                {
+                    idSucursalFinal = pedido.Id_sucursal;
+                }
+                else
+                {
+                    var sucursalExistente = await _context.Sucursales
+                        .FirstOrDefaultAsync(s => s.Id_cliente == dto.IdCliente && s.Estado == "Activo");
+
+                    if (sucursalExistente != null)
+                    {
+                        idSucursalFinal = sucursalExistente.Id;
+                    }
+                    else
+                    {
+                        var nuevaSucursal = new Sucursal
+                        {
+                            Id_cliente = dto.IdCliente,
+                            Nombre = "Principal / Mostrador",
+                            Descripcion = "Sucursal por defecto para pedidos de mostrador y entregas",
+                            Ubicacion = "Mostrador / Local",
+                            Estado = "Activo"
+                        };
+                        await _context.Sucursales.AddAsync(nuevaSucursal);
+                        await _context.SaveChangesAsync();
+                        idSucursalFinal = nuevaSucursal.Id;
+                    }
+                }
+            }
+
             var idsProductos =
                 dto.Detalles
                     .Select(d =>
@@ -670,7 +731,7 @@ namespace BadyBackend.Controllers
                     dto.IdCliente;
 
                 pedido.Id_sucursal =
-                    dto.IdSucursal;
+                    idSucursalFinal;
 
                 pedido.Observacion =
                     dto.Observacion
@@ -1765,7 +1826,7 @@ namespace BadyBackend.Controllers
         private async Task<string?>
             ValidarPedidoAsync(
                 int idCliente,
-                int idSucursal,
+                int? idSucursal,
                 List<
                     CrearDetallePedidoDto
                 >? detalles,
@@ -1799,41 +1860,45 @@ namespace BadyBackend.Controllers
                     "El cliente seleccionado se encuentra inactivo.";
             }
 
-            var sucursal =
-                await _context.Sucursales
-                    .AsNoTracking()
-                    .FirstOrDefaultAsync(
-                        s =>
-                            s.Id ==
-                            idSucursal
-                    );
-
-            if (sucursal is null)
+            // Solo validar la sucursal si fue especificada explícitamente y es > 0
+            if (idSucursal.HasValue && idSucursal.Value > 0)
             {
-                return
-                    "La sucursal seleccionada no existe.";
-            }
+                var sucursal =
+                    await _context.Sucursales
+                        .AsNoTracking()
+                        .FirstOrDefaultAsync(
+                            s =>
+                                s.Id ==
+                                idSucursal.Value
+                        );
 
-            if (
-                sucursal.Id_cliente !=
-                idCliente
-            )
-            {
-                return
-                    "La sucursal seleccionada no pertenece al cliente indicado.";
-            }
+                if (sucursal is null)
+                {
+                    return
+                        "La sucursal seleccionada no existe.";
+                }
 
-            if (
-                !string.Equals(
-                    sucursal.Estado,
-                    "Activo",
-                    StringComparison
-                        .OrdinalIgnoreCase
+                if (
+                    sucursal.Id_cliente !=
+                    idCliente
                 )
-            )
-            {
-                return
-                    "La sucursal seleccionada se encuentra inactiva.";
+                {
+                    return
+                        "La sucursal seleccionada no pertenece al cliente indicado.";
+                }
+
+                if (
+                    !string.Equals(
+                        sucursal.Estado,
+                        "Activo",
+                        StringComparison
+                            .OrdinalIgnoreCase
+                    )
+                )
+                {
+                    return
+                        "La sucursal seleccionada se encuentra inactiva.";
+                }
             }
 
             if (

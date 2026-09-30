@@ -33,33 +33,59 @@ namespace BadyBackend.Controllers
             if (!ModelState.IsValid)
                 return BadRequest(ModelState);
 
-            var emailNormalizado = dto.Email
-                .Trim()
-                .ToLowerInvariant();
+            string emailFinal;
+            bool tieneAccesoApp = !string.IsNullOrWhiteSpace(dto.Email);
 
-            var emailExiste = await _context.Clientes
-                .AnyAsync(c => c.Email.ToLower() == emailNormalizado);
-
-            if (emailExiste)
+            if (tieneAccesoApp)
             {
-                return Conflict(new
+                emailFinal = dto.Email!
+                    .Trim()
+                    .ToLowerInvariant();
+
+                var emailExiste = await _context.Clientes
+                    .AnyAsync(c => c.Email.ToLower() == emailFinal);
+
+                if (emailExiste)
                 {
-                    message = "Ya existe un cliente registrado con ese correo."
-                });
+                    return Conflict(new
+                    {
+                        message = "Ya existe un cliente registrado con ese correo."
+                    });
+                }
             }
+            else
+            {
+                // Generar identificador interno para clientes presenciales sin acceso móvil
+                var tag = Guid.NewGuid().ToString("N")[..8];
+                emailFinal = $"cli_{dto.Numero.Trim()}_{tag}@bady.internal";
+            }
+
+            var contrasenaFinal = !string.IsNullOrWhiteSpace(dto.Contrasena)
+                ? dto.Contrasena
+                : Guid.NewGuid().ToString("N");
 
             var cliente = new Cliente
             {
                 Nombre = dto.Nombre.Trim(),
                 Numero = dto.Numero.Trim(),
-                Email = emailNormalizado,
-
-                Contraseña = BadyBackend.Helpers.PasswordHelper.HashPassword(dto.Contrasena),
-
+                Email = emailFinal,
+                Contraseña = BadyBackend.Helpers.PasswordHelper.HashPassword(contrasenaFinal),
                 Estado = "Activo"
             };
 
             await _context.Clientes.AddAsync(cliente);
+            await _context.SaveChangesAsync();
+
+            // Auto-crear sucursal por defecto para el cliente (mostrador / ventas directas)
+            var sucursalPorDefecto = new Sucursal
+            {
+                Id_cliente = cliente.Id,
+                Nombre = "Principal / Mostrador",
+                Descripcion = "Sucursal por defecto para pedidos de mostrador y entregas",
+                Ubicacion = "Mostrador / Local",
+                Estado = "Activo"
+            };
+            await _context.Sucursales.AddAsync(sucursalPorDefecto);
             await _context.SaveChangesAsync();
 
             return Ok(new
@@ -70,8 +96,9 @@ namespace BadyBackend.Controllers
                     Id = cliente.Id,
                     Nombre = cliente.Nombre,
                     Numero = cliente.Numero,
-                    Email = cliente.Email,
-                    Estado = cliente.Estado
+                    Email = tieneAccesoApp ? cliente.Email : "",
+                    Estado = cliente.Estado,
+                    TieneAccesoApp = tieneAccesoApp
                 }
             });
         }
@@ -98,8 +125,9 @@ namespace BadyBackend.Controllers
                     Id = c.Id,
                     Nombre = c.Nombre,
                     Numero = c.Numero,
-                    Email = c.Email,
-                    Estado = c.Estado
+                    Email = c.Email.EndsWith("@bady.internal") ? "" : c.Email,
+                    Estado = c.Estado,
+                    TieneAccesoApp = !c.Email.EndsWith("@bady.internal")
                 })
                 .FirstOrDefaultAsync();
 
@@ -150,26 +178,30 @@ namespace BadyBackend.Controllers
                 });
             }
 
-            var emailNormalizado = dto.Email
-                .Trim()
-                .ToLowerInvariant();
-
-            var emailExiste = await _context.Clientes.AnyAsync(c =>
-                c.Email.ToLower() == emailNormalizado &&
-                c.Id != cliente.Id
-            );
-
-            if (emailExiste)
+            if (!string.IsNullOrWhiteSpace(dto.Email))
             {
-                return Conflict(new
+                var emailNormalizado = dto.Email
+                    .Trim()
+                    .ToLowerInvariant();
+
+                var emailExiste = await _context.Clientes.AnyAsync(c =>
+                    c.Email.ToLower() == emailNormalizado &&
+                    c.Id != cliente.Id
+                );
+
+                if (emailExiste)
                 {
-                    message = "El correo ya está registrado por otro cliente."
-                });
+                    return Conflict(new
+                    {
+                        message = "El correo ya está registrado por otro cliente."
+                    });
+                }
+
+                cliente.Email = emailNormalizado;
             }
 
             cliente.Nombre = dto.Nombre.Trim();
             cliente.Numero = dto.Numero.Trim();
-            cliente.Email = emailNormalizado;
 
             /*
              * Si no manda contraseña o la manda vacía,
@@ -182,6 +214,7 @@ namespace BadyBackend.Controllers
 
             await _context.SaveChangesAsync();
 
+            var tieneAccesoApp = !cliente.Email.EndsWith("@bady.internal");
             return Ok(new
             {
                 message = "Perfil actualizado correctamente.",
@@ -190,8 +223,9 @@ namespace BadyBackend.Controllers
                     Id = cliente.Id,
                     Nombre = cliente.Nombre,
                     Numero = cliente.Numero,
-                    Email = cliente.Email,
-                    Estado = cliente.Estado
+                    Email = tieneAccesoApp ? cliente.Email : "",
+                    Estado = cliente.Estado,
+                    TieneAccesoApp = tieneAccesoApp
                 }
             });
         }
@@ -268,10 +302,11 @@ namespace BadyBackend.Controllers
                 {
                     Id = c.Id,
                     Nombre = c.Nombre,
-                    Contraseña=c.Contraseña,
+                    Contraseña = c.Contraseña,
                     Numero = c.Numero,
-                    Email = c.Email,
-                    Estado = c.Estado
+                    Email = c.Email.EndsWith("@bady.internal") ? "" : c.Email,
+                    Estado = c.Estado,
+                    TieneAccesoApp = !c.Email.EndsWith("@bady.internal")
                 })
                 .ToListAsync();
 
@@ -289,8 +324,9 @@ namespace BadyBackend.Controllers
                     Id = c.Id,
                     Nombre = c.Nombre,
                     Numero = c.Numero,
-                    Email = c.Email,
-                    Estado = c.Estado
+                    Email = c.Email.EndsWith("@bady.internal") ? "" : c.Email,
+                    Estado = c.Estado,
+                    TieneAccesoApp = !c.Email.EndsWith("@bady.internal")
                 })
                 .ToListAsync();
 
@@ -308,8 +344,9 @@ namespace BadyBackend.Controllers
                     Id = c.Id,
                     Nombre = c.Nombre,
                     Numero = c.Numero,
-                    Email = c.Email,
-                    Estado = c.Estado
+                    Email = c.Email.EndsWith("@bady.internal") ? "" : c.Email,
+                    Estado = c.Estado,
+                    TieneAccesoApp = !c.Email.EndsWith("@bady.internal")
                 })
                 .ToListAsync();
 
@@ -360,8 +397,8 @@ namespace BadyBackend.Controllers
         }
         [HttpPut("{id:int}")]
         public async Task<IActionResult> ActualizarCliente(
-    int id,
-    [FromBody] ClienteUpdateDto dto)
+            int id,
+            [FromBody] ClienteUpdateDto dto)
         {
             if (!ModelState.IsValid)
                 return BadRequest(ModelState);
@@ -377,26 +414,30 @@ namespace BadyBackend.Controllers
                 });
             }
 
-            var emailNormalizado = dto.Email
-                .Trim()
-                .ToLowerInvariant();
-
-            var emailExiste = await _context.Clientes.AnyAsync(c =>
-                c.Email.ToLower() == emailNormalizado &&
-                c.Id != id
-            );
-
-            if (emailExiste)
+            if (!string.IsNullOrWhiteSpace(dto.Email))
             {
-                return Conflict(new
+                var emailNormalizado = dto.Email
+                    .Trim()
+                    .ToLowerInvariant();
+
+                var emailExiste = await _context.Clientes.AnyAsync(c =>
+                    c.Email.ToLower() == emailNormalizado &&
+                    c.Id != id
+                );
+
+                if (emailExiste)
                 {
-                    message = "El correo ya está registrado por otro cliente."
-                });
+                    return Conflict(new
+                    {
+                        message = "El correo ya está registrado por otro cliente."
+                    });
+                }
+
+                cliente.Email = emailNormalizado;
             }
 
             cliente.Nombre = dto.Nombre.Trim();
             cliente.Numero = dto.Numero.Trim();
-            cliente.Email = emailNormalizado;
 
             if (!string.IsNullOrWhiteSpace(dto.Contrasena))
             {
@@ -405,6 +446,7 @@ namespace BadyBackend.Controllers
 
             await _context.SaveChangesAsync();
 
+            var tieneAccesoApp = !cliente.Email.EndsWith("@bady.internal");
             return Ok(new
             {
                 message = "Cliente actualizado correctamente.",
@@ -413,9 +455,10 @@ namespace BadyBackend.Controllers
                     Id = cliente.Id,
                     Nombre = cliente.Nombre,
                     Numero = cliente.Numero,
-                    Email = cliente.Email,
-                    Contraseña=cliente.Contraseña,
-                    Estado = cliente.Estado
+                    Email = tieneAccesoApp ? cliente.Email : "",
+                    Contraseña = cliente.Contraseña,
+                    Estado = cliente.Estado,
+                    TieneAccesoApp = tieneAccesoApp
                 }
             });
         }

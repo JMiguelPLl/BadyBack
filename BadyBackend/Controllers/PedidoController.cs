@@ -418,6 +418,28 @@ namespace BadyBackend.Controllers
                 }
             }
 
+            // Obtener datos del usuario autenticado (para trazabilidad y auditoría de vendedor)
+            var tipoCuenta = User.FindFirstValue("tipoCuenta");
+            var nombreUsuario = User.FindFirstValue(ClaimTypes.Name) ?? "Administrador / Personal";
+            var esVentaDirecta = dto.EsVentaDirecta && tipoCuenta != "Cliente";
+
+            var observacionFinal = dto.Observacion?.Trim();
+            if (esVentaDirecta)
+            {
+                var marcaVendedor = $"[Venta directa en mostrador - Atendido por: {nombreUsuario}]";
+                observacionFinal = string.IsNullOrWhiteSpace(observacionFinal)
+                    ? marcaVendedor
+                    : $"{marcaVendedor} | {observacionFinal}";
+            }
+
+            var estadoInicial = esVentaDirecta
+                ? EstadosPedido.Entregado
+                : EstadosPedido.Pendiente;
+
+            var estadoDetalleInicial = esVentaDirecta
+                ? EstadosDetallePedido.Entregado
+                : EstadosDetallePedido.PendienteEntrega;
+
             var idsProductos =
                 dto.Detalles
                     .Select(d =>
@@ -455,12 +477,10 @@ namespace BadyBackend.Controllers
                             DateTime.UtcNow,
 
                         Observacion =
-                            dto.Observacion
-                                ?.Trim(),
+                            observacionFinal,
 
                         Estado =
-                            EstadosPedido
-                                .Pendiente,
+                            estadoInicial,
 
                         Total = 0,
 
@@ -503,8 +523,7 @@ namespace BadyBackend.Controllers
                                     subtotal,
 
                                 Estado =
-                                    EstadosDetallePedido
-                                        .PendienteEntrega
+                                    estadoDetalleInicial
                             }
                         );
 
@@ -531,7 +550,9 @@ namespace BadyBackend.Controllers
                     new
                     {
                         message =
-                            "Pedido registrado correctamente.",
+                            esVentaDirecta
+                                ? "Venta directa en mostrador registrada y entregada correctamente."
+                                : "Pedido registrado correctamente.",
 
                         idPedido =
                             pedido.Id,
@@ -541,6 +562,9 @@ namespace BadyBackend.Controllers
 
                         total =
                             pedido.Total,
+
+                        fecha =
+                            pedido.Fecha,
 
                         cantidadDetalles =
                             pedido

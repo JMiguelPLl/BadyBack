@@ -10,6 +10,12 @@ namespace BadyBackend.DTOs
 
             public int? IdSucursal { get; set; }
 
+            /*
+             * Si es true (venta en local/mostrador), el pedido nace directamente
+             * en estado 'Entregado' sin pasar por asignación de vehículo ni despacho.
+             */
+            public bool EsVentaDirecta { get; set; } = false;
+
             [StringLength(200)]
             public string? Observacion { get; set; }
 

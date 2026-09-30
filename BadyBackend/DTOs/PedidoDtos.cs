@@ -12,9 +12,16 @@ namespace BadyBackend.DTOs
 
             /*
              * Si es true (venta en local/mostrador), el pedido nace directamente
-             * en estado 'Entregado' sin pasar por asignación de vehículo ni despacho.
+             * en estado 'Entregado', sin crédito (se cobra el 100% de inmediato)
+             * y requiere especificar IdTipoPago (Efectivo o QR).
              */
             public bool EsVentaDirecta { get; set; } = false;
+
+            /*
+             * Método de pago (1 = Efectivo, 2 = QR, etc.).
+             * Requerido obligatoriamente si EsVentaDirecta == true.
+             */
+            public int? IdTipoPago { get; set; }
 
             [StringLength(200)]
             public string? Observacion { get; set; }

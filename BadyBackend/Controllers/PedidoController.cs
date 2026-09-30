@@ -421,12 +421,36 @@ namespace BadyBackend.Controllers
             // Obtener datos del usuario autenticado (para trazabilidad y auditoría de vendedor)
             var tipoCuenta = User.FindFirstValue("tipoCuenta");
             var nombreUsuario = User.FindFirstValue(ClaimTypes.Name) ?? "Administrador / Personal";
+            var idUsuario = ObtenerIdUsuarioActual();
             var esVentaDirecta = dto.EsVentaDirecta && tipoCuenta != "Cliente";
+
+            Tipo_Pago? tipoPagoSeleccionado = null;
+            if (esVentaDirecta)
+            {
+                if (!dto.IdTipoPago.HasValue || dto.IdTipoPago.Value <= 0)
+                {
+                    return BadRequest(new
+                    {
+                        message = "Para ventas directas en mostrador debe seleccionar el método de pago (Efectivo o QR)."
+                    });
+                }
+
+                tipoPagoSeleccionado = await _context.Tipo_Pagos
+                    .FirstOrDefaultAsync(t => t.Id == dto.IdTipoPago.Value && t.Estado == "Activo");
+
+                if (tipoPagoSeleccionado == null)
+                {
+                    return BadRequest(new
+                    {
+                        message = "El método de pago seleccionado no es válido o no está activo."
+                    });
+                }
+            }
 
             var observacionFinal = dto.Observacion?.Trim();
             if (esVentaDirecta)
             {
-                var marcaVendedor = $"[Venta directa en mostrador - Atendido por: {nombreUsuario}]";
+                var marcaVendedor = $"[Venta directa en mostrador - Pago: {tipoPagoSeleccionado?.Descripcion} - Atendido por: {nombreUsuario}]";
                 observacionFinal = string.IsNullOrWhiteSpace(observacionFinal)
                     ? marcaVendedor
                     : $"{marcaVendedor} | {observacionFinal}";
@@ -538,6 +562,43 @@ namespace BadyBackend.Controllers
                 await _context
                     .SaveChangesAsync();
 
+                // Si es venta directa en mostrador, registrar inmediatamente el pago total (sin crédito)
+                if (esVentaDirecta && idUsuario.HasValue && tipoPagoSeleccionado != null)
+                {
+                    var pago = new Pago
+                    {
+                        Id_usuario = idUsuario.Value,
+                        Id_pedido = pedido.Id,
+                        Id_tipoPago = tipoPagoSeleccionado.Id,
+                        Fecha = DateTime.UtcNow,
+                        MontoPagado = pedido.Total,
+                        SaldoPendiente = 0m,
+                        Estado = EstadosPago.Activo
+                    };
+
+                    await _context.Pagos.AddAsync(pago);
+                    await _context.SaveChangesAsync();
+
+                    // Si el usuario tiene una caja abierta, registrar en el detalle de su caja
+                    var cajaAbierta = await _context.Cierre_Cajas
+                        .FirstOrDefaultAsync(c =>
+                            c.Id_usuario == idUsuario.Value &&
+                            c.Estado == EstadosCierreCaja.Abierta
+                        );
+
+                    if (cajaAbierta != null)
+                    {
+                        var detalleCierre = new Cierre_Caja_Detalle
+                        {
+                            Id_cierre_caja = cajaAbierta.Id,
+                            Id_pago = pago.Id,
+                            Fecha = pago.Fecha
+                        };
+                        await _context.Cierre_Caja_Detalles.AddAsync(detalleCierre);
+                        await _context.SaveChangesAsync();
+                    }
+                }
+
                 await transaccion
                     .CommitAsync();
 
@@ -551,7 +612,7 @@ namespace BadyBackend.Controllers
                     {
                         message =
                             esVentaDirecta
-                                ? "Venta directa en mostrador registrada y entregada correctamente."
+                                ? "Venta directa en mostrador registrada, entregada y pagada en su totalidad exitosamente."
                                 : "Pedido registrado correctamente.",
 
                         idPedido =
@@ -562,6 +623,18 @@ namespace BadyBackend.Controllers
 
                         total =
                             pedido.Total,
+
+                        montoPagado =
+                            esVentaDirecta ? pedido.Total : 0m,
+
+                        saldoPendiente =
+                            esVentaDirecta ? 0m : (decimal?)null,
+
+                        tipoPago =
+                            tipoPagoSeleccionado?.Descripcion,
+
+                        atendidoPor =
+                            esVentaDirecta ? nombreUsuario : null,
 
                         fecha =
                             pedido.Fecha,
@@ -2087,6 +2160,31 @@ namespace BadyBackend.Controllers
             }
 
             return null;
+        }
+
+
+        private int? ObtenerIdUsuarioActual()
+        {
+            var claim =
+                User.FindFirstValue(
+                    ClaimTypes.NameIdentifier
+                )
+                ??
+                User.FindFirstValue(
+                    "sub"
+                );
+
+            if (string.IsNullOrWhiteSpace(claim))
+            {
+                return null;
+            }
+
+            return int.TryParse(
+                claim,
+                out var idUsuario
+            )
+                ? idUsuario
+                : null;
         }
 
 
